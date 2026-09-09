@@ -12,7 +12,7 @@ st.set_page_config(page_title="학교 급식 식단 달력", layout="wide")
 st.markdown(
     """
     <style>
-    /* 급식 카드 테두리 및 스타일 */
+    /* 급식 카드 기본 스타일 */
     .meal-card {
         border: 1px solid #e0e0e0;
         border-radius: 8px;
@@ -27,9 +27,10 @@ st.markdown(
         border: 2px solid #ff4b4b !important;
         background-color: #fff9f9 !important;
     }
-    /* 알레르기 경고 카드 강조 */
+    /* 알레르기 주의 카드 강조 */
     .warning-card {
-        border: 1.5px solid #ffa726;
+        border: 2px solid #ffa726 !important;
+        background-color: #fffde7 !important;
     }
     /* 급식 종류별 배지 스타일 */
     .badge-lunch {
@@ -116,7 +117,6 @@ def convert_allergy_numbers(menu_text, convert_flag):
     if not convert_flag:
         return menu_text
 
-    # NEIS 식단 텍스트는 보통 "음식명.1.2.5." 형태로 오므로 이를 변환
     def replace_numbers(match):
         numbers = [n for n in match.group(1).split(".") if n]
         names = [ALLERGY_DICT.get(n, n) for n in numbers]
@@ -126,26 +126,22 @@ def convert_allergy_numbers(menu_text, convert_flag):
     return cleaned_menu
 
 
-# 식단 개별 항목에서 알레르기 식재료 유무 체크 함수
+# 메뉴 항목에 검색 알레르기가 포함되어 있는지 확인하는 함수
 def check_allergy_match(menu_text, allergy_targets):
     if not allergy_targets:
-        return False, menu_text
+        return False
 
-    # 숫자로 입력받았거나 이름으로 입력받았는지 판별
     for target in allergy_targets:
         target_str = str(target).strip()
-
-        # 알레르기 번호 매칭 (예: .1. 또는 1.)
-        is_num = target_str in ALLERGY_DICT
         target_name = ALLERGY_DICT.get(target_str, target_str)
 
-        # 메뉴 문자열 내에 식재료 명이나 해당 번호 패턴이 포함되어 있는지 확인
+        # 메뉴명 자체 또는 번호 패턴(.1. 형태로 포함된 경우) 검사
         if (target_name in menu_text) or (
-            is_num and f".{target_str}." in menu_text
+            target_str in ALLERGY_DICT and f".{target_str}." in menu_text
         ):
-            return True, target_name
+            return True
 
-    return False, None
+    return False
 
 
 # ==========================================
@@ -166,11 +162,10 @@ school_code = st.sidebar.text_input("표준학교코드", value="7010537")
 
 convert_allergy = st.sidebar.toggle("알레르기 식품명으로 변환", value=True)
 
-# 🚨 알레르기 주의 음식 검색/선택 필터 추가
+# 🚨 알레르기 주의 음식 검색 필터
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚠️ 알레르기 음식 검색")
 
-# 알레르기 19가지 기본 목록
 allergy_options = [f"{code}. {name}" for code, name in ALLERGY_DICT.items()]
 selected_allergies = st.sidebar.multiselect(
     "주의할 알레르기 항목 선택",
@@ -178,13 +173,12 @@ selected_allergies = st.sidebar.multiselect(
     help="선택한 항목이 포함된 메뉴를 찾아서 알려드립니다.",
 )
 
-# 직접 텍스트 검색 (예: 오징어, 콩 등)
 custom_allergy = st.sidebar.text_input(
     "기타 주의 키워드 직접 입력",
     placeholder="예: 카레, 치즈",
 )
 
-# 검색 대상 알레르기 키워드 리스트 정제
+# 대상 알레르기 목록 정제
 allergy_targets = []
 for item in selected_allergies:
     code = item.split(".")[0]
@@ -283,7 +277,7 @@ if raw_meals:
         meals_by_date[ymd].append(meal)
 
 # ==========================================
-# 5. 🚨 알레르기 필터 요약 박스 (한눈에 보기)
+# 5. 알레르기 모아보기 요약 박스
 # ==========================================
 if allergy_targets:
     matched_summary = []
@@ -296,10 +290,7 @@ if allergy_targets:
             items = menu_raw.split("<br/>")
 
             for item in items:
-                has_allergy, matched_keyword = check_allergy_match(
-                    item, allergy_targets
-                )
-                if has_allergy:
+                if check_allergy_match(item, allergy_targets):
                     clean_item = convert_allergy_numbers(item, True)
                     matched_summary.append(
                         f"**{selected_month}/{day_num}일 [{meal_name}]**: {clean_item}"
@@ -348,16 +339,16 @@ try:
 
                 day_meals = meals_by_date.get(current_date_str, [])
 
-                # 알레르기 식재료 포함 여부 체크
+                # 해당 날짜에 알레르기 식재료가 포함되어 있는지 확인
                 has_day_allergy = False
                 if allergy_targets and day_meals:
                     for m in day_meals:
                         for item in m.get("DDISH_NM", "").split("<br/>"):
-                            if check_allergy_match(item, allergy_targets)[0]:
+                            if check_allergy_match(item, allergy_targets):
                                 has_day_allergy = True
                                 break
 
-                # 카드 스타일 선택
+                # 카드 스타일 설정
                 card_class = "meal-card"
                 if is_today:
                     card_class += " today-card"
@@ -420,11 +411,8 @@ try:
                             if not item_clean:
                                 continue
 
-                            # 개별 메뉴 알레르기 하이라이트 검사
-                            is_match, _ = check_allergy_match(
-                                item, allergy_targets
-                            )
-                            if is_match:
+                            # 개별 항목 강조
+                            if check_allergy_match(item, allergy_targets):
                                 html_content += f"<li><span class='allergy-alert'>⚠️ {item_clean}</span></li>"
                             else:
                                 html_content += f"<li>{item_clean}</li>"
