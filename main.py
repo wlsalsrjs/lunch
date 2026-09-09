@@ -157,8 +157,12 @@ NEIS_KEY = st.secrets["NEIS_KEY"]
 
 st.sidebar.title("🏫 학교 및 알레르기 설정")
 
-office_code = st.sidebar.text_input("시도교육청코드", value="B10")
-school_code = st.sidebar.text_input("표준학교코드", value="7010537")
+office_code = st.sidebar.text_input(
+    "시도교육청코드", value="B10", help="예: 서울 B10, 경기 J10"
+).strip()
+school_code = st.sidebar.text_input(
+    "표준학교코드", value="7010537", help="예: 7010537"
+).strip()
 
 convert_allergy = st.sidebar.toggle("알레르기 식품명으로 변환", value=True)
 
@@ -220,7 +224,7 @@ with col_type:
 
 
 # ==========================================
-# 4. NEIS API 데이터 호출
+# 4. NEIS API 데이터 호출 (에러 처리 보완)
 # ==========================================
 @st.cache_data(ttl=3600)
 def fetch_month_meals(year, month, edu_code, sch_code, api_key):
@@ -241,22 +245,40 @@ def fetch_month_meals(year, month, edu_code, sch_code, api_key):
     }
 
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        response = requests.get(url, params=params, timeout=10)
+
+        # HTTP status check
+        if response.status_code != 200:
+            return (
+                None,
+                f"API 요청 실패 (HTTP {response.status_code}). 요청 URL과 파라미터를 확인해주세요.",
+            )
+
+        # JSON 파싱 검증 (Expecting value 에러 방지)
+        try:
+            data = response.json()
+        except Exception:
+            return (
+                None,
+                "API 응답 데이터 형식이 올바르지 않습니다 (JSON 파싱 실패). NEIS API Key가 유효한지 확인해주세요.",
+            )
 
         if "mealServiceDietInfo" in data:
             return data["mealServiceDietInfo"][1]["row"], None
         else:
-            code = data.get("RESULT", {}).get("CODE", "UNKNOWN")
+            # RESULT 메시지 확인
+            result_info = data.get("RESULT", {})
+            code = result_info.get("CODE", "UNKNOWN")
+            message = result_info.get("MESSAGE", "정보가 없습니다.")
+
+            # 데이터가 없는 정상 상황 (INFO-200)
             if code == "INFO-200":
                 return [], None
-            return (
-                None,
-                f"API 응답 오류 ({code}): {data.get('RESULT', {}).get('MESSAGE', '')}",
-            )
+
+            return None, f"NEIS API 오류 [{code}]: {message}"
+
     except requests.exceptions.RequestException as e:
-        return None, f"API 통신 오류가 발생했습니다: {e}"
+        return None, f"네트워크 통신 오류가 발생했습니다: {e}"
 
 
 raw_meals, error_msg = fetch_month_meals(
