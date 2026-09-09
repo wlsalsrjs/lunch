@@ -126,7 +126,7 @@ def convert_allergy_numbers(menu_text, convert_flag):
     return cleaned_menu
 
 
-# 메뉴 항목에 검색 알레르기가 포함되어 있는지 확인하는 함수
+# 메뉴 항목에 검색 알레르기 식재료가 들어있는지 검사
 def check_allergy_match(menu_text, allergy_targets):
     if not allergy_targets:
         return False
@@ -135,7 +135,7 @@ def check_allergy_match(menu_text, allergy_targets):
         target_str = str(target).strip()
         target_name = ALLERGY_DICT.get(target_str, target_str)
 
-        # 메뉴명 자체 또는 번호 패턴(.1. 형태로 포함된 경우) 검사
+        # 메뉴 문자열 내에 이름이나 번호 패턴(.1. 형태로 포함된 경우) 검사
         if (target_name in menu_text) or (
             target_str in ALLERGY_DICT and f".{target_str}." in menu_text
         ):
@@ -157,12 +157,13 @@ NEIS_KEY = st.secrets["NEIS_KEY"]
 
 st.sidebar.title("🏫 학교 및 알레르기 설정")
 
-office_code = st.sidebar.text_input(
-    "시도교육청코드", value="B10", help="예: 서울 B10, 경기 J10"
-).strip()
-school_code = st.sidebar.text_input(
-    "표준학교코드", value="7010537", help="예: 7010537"
-).strip()
+# 📌 요청받은 코드 기본값 설정 (대문자 T10 및 9290088 적용)
+office_code = (
+    st.sidebar.text_input("시도교육청코드", value="T10", help="예: T10 (제주)").strip().upper()
+)
+school_code = (
+    st.sidebar.text_input("표준학교코드", value="9290088").strip()
+)
 
 convert_allergy = st.sidebar.toggle("알레르기 식품명으로 변환", value=True)
 
@@ -224,7 +225,7 @@ with col_type:
 
 
 # ==========================================
-# 4. NEIS API 데이터 호출 (에러 처리 보완)
+# 4. NEIS API 데이터 호출
 # ==========================================
 @st.cache_data(ttl=3600)
 def fetch_month_meals(year, month, edu_code, sch_code, api_key):
@@ -247,35 +248,31 @@ def fetch_month_meals(year, month, edu_code, sch_code, api_key):
     try:
         response = requests.get(url, params=params, timeout=10)
 
-        # HTTP status check
         if response.status_code != 200:
             return (
                 None,
-                f"API 요청 실패 (HTTP {response.status_code}). 요청 URL과 파라미터를 확인해주세요.",
+                f"API 요청 실패 (HTTP 상태코드 {response.status_code}). 요청 정보를 확인해 주세요.",
             )
 
-        # JSON 파싱 검증 (Expecting value 에러 방지)
         try:
             data = response.json()
         except Exception:
             return (
                 None,
-                "API 응답 데이터 형식이 올바르지 않습니다 (JSON 파싱 실패). NEIS API Key가 유효한지 확인해주세요.",
+                "API 응답 결과를 분석할 수 없습니다 (JSON 형식 오류). 입력한 교육청코드/학교코드가 올바른지 확인해 주세요.",
             )
 
         if "mealServiceDietInfo" in data:
             return data["mealServiceDietInfo"][1]["row"], None
         else:
-            # RESULT 메시지 확인
             result_info = data.get("RESULT", {})
             code = result_info.get("CODE", "UNKNOWN")
-            message = result_info.get("MESSAGE", "정보가 없습니다.")
+            message = result_info.get("MESSAGE", "급식 데이터가 없습니다.")
 
-            # 데이터가 없는 정상 상황 (INFO-200)
             if code == "INFO-200":
                 return [], None
 
-            return None, f"NEIS API 오류 [{code}]: {message}"
+            return None, f"NEIS API 응답 오류 [{code}]: {message}"
 
     except requests.exceptions.RequestException as e:
         return None, f"네트워크 통신 오류가 발생했습니다: {e}"
@@ -289,7 +286,7 @@ if error_msg:
     st.error(f"❌ {error_msg}")
     st.stop()
 
-# 날짜별 그룹화
+# 날짜별 데이터 구조화
 meals_by_date = {}
 if raw_meals:
     for meal in raw_meals:
@@ -299,7 +296,7 @@ if raw_meals:
         meals_by_date[ymd].append(meal)
 
 # ==========================================
-# 5. 알레르기 모아보기 요약 박스
+# 5. 알레르기 메뉴 요약 박스
 # ==========================================
 if allergy_targets:
     matched_summary = []
@@ -361,7 +358,7 @@ try:
 
                 day_meals = meals_by_date.get(current_date_str, [])
 
-                # 해당 날짜에 알레르기 식재료가 포함되어 있는지 확인
+                # 해당 날짜에 알레르기 유발 식품이 있는지 확인
                 has_day_allergy = False
                 if allergy_targets and day_meals:
                     for m in day_meals:
@@ -370,7 +367,7 @@ try:
                                 has_day_allergy = True
                                 break
 
-                # 카드 스타일 설정
+                # 카드 테두리 및 배경 설정
                 card_class = "meal-card"
                 if is_today:
                     card_class += " today-card"
@@ -433,7 +430,7 @@ try:
                             if not item_clean:
                                 continue
 
-                            # 개별 항목 강조
+                            # 알레르기 항목 하이라이트
                             if check_allergy_match(item, allergy_targets):
                                 html_content += f"<li><span class='allergy-alert'>⚠️ {item_clean}</span></li>"
                             else:
